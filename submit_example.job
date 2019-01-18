@@ -10,12 +10,11 @@ source activate /lus/theta-fs0/projects/datascience/keceli/miniconda3
 
 # Number of MPI ranks per node
 PPN=1
-# Pete's recommendation: 62 threads and 3 tensorflow "hyperthreads" (num_inter_threads)
-export OMP_NUM_THREADS=64
+export OMP_NUM_THREADS=128
 
 train_dir=${PWD}/models/test2
 
-aprun -n $((${COBALT_PARTSIZE} * ${PPN})) -N ${PPN} -d 64 -j 1 -cc depth -b /lus/theta-fs0/projects/datascience/keceli/miniconda3/bin/python horovod_train.py \
+aprun -n $((${COBALT_PARTSIZE} * ${PPN})) -N ${PPN} -d 128 -j 2 -cc depth -b /lus/theta-fs0/projects/datascience/keceli/miniconda3/bin/python horovod_train.py \
   --train_coords /home/dongws/ffn/ffn/third_party/neuroproof_examples/validation_sample/fib_flyem_validation1_label_lom24_24_24_part14_wbbox_coords-*-of-00025.gz \
   --data_volumes validation1:/home/dongws/ffn/ffn/third_party/neuroproof_examples/validation_sample/grayscale_maps.h5:raw \
   --label_volumes validation1:/home/dongws/ffn/ffn/third_party/neuroproof_examples/validation_sample/groundtruth.h5:stack \
