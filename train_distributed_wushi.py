@@ -356,12 +356,11 @@ def _get_permutable_axes():
 
 # Parse serialized example from tfrecord file
 def parser_fn(serialized_example):
-  features = tf.parse_single_example(
-          serialized_example, 
+  features = tf.parse_single_example(serialized_example, 
           features=dict(
-            center=tf.FixedLenFeature(shape=[1, 3], dtype=tf.int64), 
-            label_volume_name=tf.FixedLenFeature(shape=[1], dtype=tf.string)
-            )
+              center=tf.FixedLenFeature(shape=[1, 3], dtype=tf.int64), 
+              label_volume_name=tf.FixedLenFeature(shape=[1], dtype=tf.string)
+              )
           )
   coord = features['center']
   volname = features['label_volume_name']
@@ -640,135 +639,125 @@ def save_flags():
 
 def train_ffn(model_cls, **model_kwargs):
   with tf.Graph().as_default():
-    with tf.device(tf.train.replica_device_setter(FLAGS.ps_tasks, merge_devices=True)):
-      # The constructor might define TF ops/placeholders, so it is important
-      # that the FFN is instantiated within the current context.
-      model = model_cls(**model_kwargs)
-      eval_shape_zyx = train_eval_size(model).tolist()[::-1]
+    # The constructor might define TF ops/placeholders, so it is important
+    # that the FFN is instantiated within the current context.
+    model = model_cls(**model_kwargs)
+    eval_shape_zyx = train_eval_size(model).tolist()[::-1]
 
-      eval_tracker = EvalTracker(eval_shape_zyx)
-      load_data_ops = define_data_input_distributed(model, queue_batch=1)
-#      load_data_ops = define_data_input(model, queue_batch=1)
-      prepare_ffn(model)
-      merge_summaries_op = tf.summary.merge_all()
+    eval_tracker = EvalTracker(eval_shape_zyx)
+    load_data_ops = define_data_input_distributed(model, queue_batch=1)
+#    load_data_ops = define_data_input(model, queue_batch=1)
+    prepare_ffn(model)
+    merge_summaries_op = tf.summary.merge_all()
 
-      # Horovod: I/O by rank 0
-      if hvd.rank()==0:
-        if FLAGS.task == 0:
-          save_flags()
+    # Horovod: I/O by rank 0
+    if hvd.rank()==0:
+      save_flags()
 
-      summary_writer = None
-      saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.25)
-      scaffold = tf.train.Scaffold(saver=saver)
-      hooks = [
-          # Horovod: BroadcastGlobalVariablesHook broadcasts initial variable 
-          # states from rank 0 to all other processes. This is necessary to 
-          # ensure consistent initialization of all workers when training is 
-          # started with random weights or restored from a checkpoint.
-          hvd.BroadcastGlobalVariablesHook(0),
+    summary_writer = None
+    saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.25)
+    scaffold = tf.train.Scaffold(saver=saver)
+    hooks = [
+        # Horovod: BroadcastGlobalVariablesHook broadcasts initial variable 
+        # states from rank 0 to all other processes. This is necessary to 
+        # ensure consistent initialization of all workers when training is 
+        # started with random weights or restored from a checkpoint.
+        hvd.BroadcastGlobalVariablesHook(0),
   
-          # Horovod: adjust number of steps based on number of GPUs.
-          tf.train.StopAtStepHook(last_step=FLAGS.max_steps // hvd.size()),
+        # Horovod: adjust number of steps based on number of GPUs.
+        tf.train.StopAtStepHook(last_step=FLAGS.max_steps // hvd.size()),
   
-#          tf.train.LoggingTensorHook(tensors={'step': global_step, 'loss': 
-#                                     loss}, every_n_iter=10),
-      ]
+#        tf.train.LoggingTensorHook(tensors={'step': global_step, 'loss': 
+#                                   loss}, every_n_iter=10),
+    ]
 
-      # Horovod: Pin GPU to be used to process local rank (one GPU per process)
-      config=tf.ConfigProto(log_device_placement=False, 
-                            allow_soft_placement=True)
-      config.gpu_options.allow_growth = True
-      config.gpu_options.visible_device_list = str(hvd.local_rank())
+    # Horovod: Pin GPU to be used to process local rank (one GPU per process)
+    config=tf.ConfigProto(log_device_placement=False, 
+                          allow_soft_placement=True)
+    config.gpu_options.allow_growth = True
+    config.gpu_options.visible_device_list = str(hvd.local_rank())
 
-      # Horovod: save checkpoints only on worker 0 to prevent other workers from
-      # corrupting them.
-      checkpoint_dir = FLAGS.train_dir if hvd.rank() == 0 else None
-      
-      with tf.train.MonitoredTrainingSession(
-          master=FLAGS.master,
-          is_chief=(FLAGS.task == 0),
-          save_summaries_steps=None,
-          save_checkpoint_secs=300,
-          config=config,
-          checkpoint_dir=checkpoint_dir,
-          hooks=hooks,
-          scaffold=scaffold) as sess:
+    # Horovod: save checkpoints only on worker 0 to prevent other workers from
+    # corrupting them.
+    checkpoint_dir = FLAGS.train_dir if hvd.rank() == 0 else None
+    
+    with tf.train.MonitoredTrainingSession(
+        master=FLAGS.master,
+        save_summaries_steps=None,
+        save_checkpoint_secs=60,
+        config=config,
+        checkpoint_dir=checkpoint_dir,
+        hooks=hooks,
+        scaffold=scaffold) as sess:
 
-        eval_tracker.sess = sess
-        step = int(sess.run(model.global_step))
+      eval_tracker.sess = sess
+      step = int(sess.run(model.global_step))
 
-        if FLAGS.task > 0:
-          # To avoid early instabilities when using multiple replicas, we use
-          # a launch schedule where new replicas are brought online gradually.
-          logging.info('Delaying replica start.')
-          while step < FLAGS.replica_step_delay * FLAGS.task:
-            time.sleep(5.0)
-            step = int(sess.run(model.global_step))
-        else:
-          summary_writer = tf.summary.FileWriterCache.get(FLAGS.train_dir)
-          summary_writer.add_session_log(
-              tf.summary.SessionLog(status=tf.summary.SessionLog.START), step)
+      if hvd.rank() == 0:
+        summary_writer = tf.summary.FileWriterCache.get(FLAGS.train_dir)
+        summary_writer.add_session_log(
+            tf.summary.SessionLog(status=tf.summary.SessionLog.START), step)
 
-        fov_shifts = list(model.shifts)  # x, y, z
-        if FLAGS.shuffle_moves:
-          random.shuffle(fov_shifts)
+      fov_shifts = list(model.shifts)  # x, y, z
+      if FLAGS.shuffle_moves:
+        random.shuffle(fov_shifts)
 
-        policy_map = {
-            'fixed': partial(fixed_offsets, fov_shifts=fov_shifts),
-            'max_pred_moves': max_pred_offsets
-        }
-        batch_it = get_batch(lambda: sess.run(load_data_ops),
-                             eval_tracker, model, FLAGS.batch_size,
-                             policy_map[FLAGS.fov_policy])
+      policy_map = {
+          'fixed': partial(fixed_offsets, fov_shifts=fov_shifts),
+          'max_pred_moves': max_pred_offsets
+      }
+      batch_it = get_batch(lambda: sess.run(load_data_ops),
+                           eval_tracker, model, FLAGS.batch_size,
+                           policy_map[FLAGS.fov_policy])
 
-        t_last = time.time()
+      t_last = time.time()
 
-#        while not sess.should_stop() and step < FLAGS.max_steps // hv
+#      while not sess.should_stop() and step < FLAGS.max_steps // hv
 #
-#        d.size():
-        while not sess.should_stop():
-          # Run summaries periodically.
-          t_curr = time.time()
-          if t_curr - t_last > FLAGS.summary_rate_secs and FLAGS.task == 0:
-            summ_op = merge_summaries_op
-            t_last = t_curr
-          else:
-            summ_op = None
+#      d.size():
+      while not sess.should_stop():
+        # Run summaries periodically.
+        t_curr = time.time()
+        if t_curr - t_last > FLAGS.summary_rate_secs and hvd.rank() == 0:
+          summ_op = merge_summaries_op
+          t_last = t_curr
+        else:
+          summ_op = None
 
-          seed, patches, labels, weights = next(batch_it)
+        seed, patches, labels, weights = next(batch_it)
 
-          updated_seed, step, summ = run_training_step(
-              sess, model, summ_op,
-              feed_dict={
-                  model.loss_weights: weights,
-                  model.labels: labels,
-                  model.input_patches: patches,
-                  model.input_seed: seed,
-              })
+        updated_seed, step, summ = run_training_step(
+            sess, model, summ_op,
+            feed_dict={
+                model.loss_weights: weights,
+                model.labels: labels,
+                model.input_patches: patches,
+                model.input_seed: seed,
+            })
 
-          # Save prediction results in the original seed array so that
-          # they can be used in subsequent steps.
-          mask.update_at(seed, (0, 0, 0), updated_seed)
+        # Save prediction results in the original seed array so that
+        # they can be used in subsequent steps.
+        mask.update_at(seed, (0, 0, 0), updated_seed)
 
-          # Horovod: I/O by rank 0
-          if hvd.rank() == 0:
+        # Horovod: I/O by rank 0
+        if hvd.rank() == 0:
 
-            # Record summaries.
-            if summ is not None:
-              logging.info('Saving summaries.')
-              summ = tf.Summary.FromString(summ)
+          # Record summaries.
+          if summ is not None:
+            logging.info('Saving summaries.')
+            summ = tf.Summary.FromString(summ)
   
-              # Compute a loss over the whole training patch (i.e. more than a
-              # single-step field of view of the network). This quantifies the
-              # quality of the final object mask.
-              summ.value.extend(eval_tracker.get_summaries())
-              eval_tracker.reset()
+            # Compute a loss over the whole training patch (i.e. more than a
+            # single-step field of view of the network). This quantifies the
+            # quality of the final object mask.
+            summ.value.extend(eval_tracker.get_summaries())
+            eval_tracker.reset()
   
-              assert summary_writer is not None
-              summary_writer.add_summary(summ, step)
+            assert summary_writer is not None
+            summary_writer.add_summary(summ, step)
 
-      if summary_writer is not None:
-        summary_writer.flush()
+    if summary_writer is not None:
+      summary_writer.flush()
 
 
 def main(argv=()):
@@ -778,12 +767,12 @@ def main(argv=()):
   hvd.init()
 
   # Horovod: I/O by rank 0
-  logging.info('[INFO] Rank: %d / %d, Task: %d' % (hvd.rank() + 1, hvd.size(), FLAGS.task))
+  logging.info('[INFO] Rank: %d / %d' % (hvd.rank() + 1, hvd.size()))
 
   model_class = import_symbol(FLAGS.model_name)
-  # Multiply the task number by a value large enough that tasks starting at a
+  # Multiply the Horovod rank by a value large enough that runs starting at a
   # similar time cannot end up with the same seed.
-  seed = int(time.time() + (FLAGS.task * 3600 + hvd.rank()) * 3600)
+  seed = int(time.time() + hvd.rank() * 3600)
   logging.info('Random seed: %r', seed)
   random.seed(seed)
 
