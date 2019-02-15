@@ -378,8 +378,7 @@ def define_data_input_distributed(model, queue_batch=None):
   image_volume_map = {}
   for vol in FLAGS.data_volumes.split(','):
     volname, path, dataset = vol.split(':')
- 
-  image_volume_map[volname] = h5py.File(path)[dataset]
+    image_volume_map[volname] = h5py.File(path)[dataset]
 
   if queue_batch is None:
     queue_batch = FLAGS.batch_size
