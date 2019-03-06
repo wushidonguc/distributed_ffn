@@ -1,5 +1,5 @@
 # distributed_ffn
-Distributed training of Flood-Filling Networks (FFNs) for instance segmentation in 3d volumes implemented with Horovod. (Still under active development)
+Distributed training of Flood-Filling Networks (FFNs) for instance segmentation in 3d volumes implemented with Horovod.
 
 ## References
 
