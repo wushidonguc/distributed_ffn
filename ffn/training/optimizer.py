@@ -18,6 +18,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import logging
+
 import tensorflow as tf
 import horovod.tensorflow as hvd
 
@@ -41,10 +43,10 @@ flags.DEFINE_float('adam_beta2', 0.999, 'Gradient^2 decay term for Adam.')
 flags.DEFINE_float('epsilon', 1e-8, 'Epsilon term for RMSProp and Adam.')
 
 
-def optimizer_from_flags():
+def optimizer_from_flags(lr):
     
-  # Horovod: Scale learning rate linearly with number of Horovod ranks
-  lr = FLAGS.learning_rate * hvd.size()
+#  # Horovod: Scale learning rate linearly with number of Horovod ranks
+#  lr = FLAGS.learning_rate * hvd.size()
 
   if FLAGS.optimizer == 'momentum':
     opt = tf.train.MomentumOptimizer(lr, FLAGS.momentum)
