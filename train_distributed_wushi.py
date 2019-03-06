@@ -102,6 +102,10 @@ flags.DEFINE_integer('replica_step_delay', 300,
                      'replica.')
 flags.DEFINE_integer('summary_rate_secs', 120,
                      'How often to save summaries (in seconds).')
+# Wushi: added learning rate warmup parameters
+flags.DEFINE_integer('warmup_steps', 0, 'Number of warmup steps.')
+flags.DEFINE_string('lr_scaling', 'linear',
+                     'learning rate scaling method for horovod: "linear" or "sqrt".')
 
 # FFN training options.
 flags.DEFINE_float('seed_pad', 0.05,
@@ -378,7 +382,8 @@ def define_data_input_distributed(model, queue_batch=None):
   image_volume_map = {}
   for vol in FLAGS.data_volumes.split(','):
     volname, path, dataset = vol.split(':')
-    image_volume_map[volname] = h5py.File(path)[dataset]
+ 
+  image_volume_map[volname] = h5py.File(path)[dataset]
 
   if queue_batch is None:
     queue_batch = FLAGS.batch_size
@@ -625,6 +630,22 @@ def get_batch(load_example, eval_tracker, model, batch_size, get_offsets):
       seeds[i][:] = batched_seeds[i, ...]
 
 
+def get_learning_rate(step):
+    """Wushi: Generates learning rate for current step according to learning 
+       rate rule.
+    """
+    target_lr = FLAGS.learning_rate * hvd.size() # linear scaling
+    if step < FLAGS.warmup_steps:
+      if FLAGS.lr_scaling == 'linear':
+        return target_lr * float(step) / float(FLAGS.warmup_steps)
+      elif FLAGS.lr_scaling == 'sqrt':
+        return target_lr * np.sqrt(float(step) / float(FLAGS.warmup_steps))
+      else:
+        raise ValueError('[ERROR] FLAGS.lr_scaling can only be "linear" or "sqrt".')
+    else:
+      return target_lr
+
+
 def save_flags():
   gfile.MakeDirs(FLAGS.train_dir)
   with gfile.Open(os.path.join(FLAGS.train_dir,
@@ -725,6 +746,10 @@ def train_ffn(model_cls, **model_kwargs):
 
         seed, patches, labels, weights = next(batch_it)
 
+        scaled_lr = get_learning_rate(step) # Wushi: get learning rate for current step
+#        logging.info('[INFO] Learning rate for step %d is: %f' % (step, scaled_lr))
+#        logging.info('[INFO] # of warmup steps: %d' % (FLAGS.warmup_steps))
+
         updated_seed, step, summ = run_training_step(
             sess, model, summ_op,
             feed_dict={
@@ -732,6 +757,7 @@ def train_ffn(model_cls, **model_kwargs):
                 model.labels: labels,
                 model.input_patches: patches,
                 model.input_seed: seed,
+                model.learning_rate: scaled_lr # Wushi: update learning rate
             })
 
         # Save prediction results in the original seed array so that
@@ -766,7 +792,7 @@ def main(argv=()):
   hvd.init()
 
   # Horovod: I/O by rank 0
-  logging.info('[INFO] Rank: %d / %d' % (hvd.rank() + 1, hvd.size()))
+  logging.info('Rank: %d / %d' % (hvd.rank() + 1, hvd.size()))
 
   model_class = import_symbol(FLAGS.model_name)
   # Multiply the Horovod rank by a value large enough that runs starting at a
