@@ -630,17 +630,17 @@ def get_batch(load_example, eval_tracker, model, batch_size, get_offsets):
 
 
 def get_learning_rate(step):
-    """Wushi: Generates learning rate for current step according to learning 
-       rate rule.
+    """Wushi: Generates learning rate for current step according to scaling rule.
     """
-    target_lr = FLAGS.learning_rate * hvd.size() # linear scaling
+    if FLAGS.lr_scaling == 'linear':
+      target_lr = FLAGS.learning_rate * hvd.size() # linear scaling        
+    elif FLAGS.lr_scaling == 'sqrt':
+      target_lr = FLAGS.learning_rate * np.sqrt(hvd.size())  # sqrt scaling
+    else:
+      raise ValueError('[ERROR] FLAGS.lr_scaling can only be "linear" or "sqrt".')
+
     if step < FLAGS.warmup_steps:
-      if FLAGS.lr_scaling == 'linear':
-        return target_lr * float(step) / float(FLAGS.warmup_steps)
-      elif FLAGS.lr_scaling == 'sqrt':
-        return target_lr * np.sqrt(float(step) / float(FLAGS.warmup_steps))
-      else:
-        raise ValueError('[ERROR] FLAGS.lr_scaling can only be "linear" or "sqrt".')
+      return target_lr * float(step) / float(FLAGS.warmup_steps)
     else:
       return target_lr
 
