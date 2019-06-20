@@ -13,4 +13,4 @@ Mapping all the neurons in the brain requires automatic reconstruction of entire
 
 *  [[1] Flood-Filling Networks (Google's original single-node version)](https://github.com/google/ffn)
 *  [[2] Horovod: Distributed training framework for TensorFlow.](https://github.com/uber/horovod)
-*  [[3] Scaling Distributed Training of Flood-Filling Networks on HPC Infrastructure for Brain Mapping] (https://arxiv.org/abs/1905.06236)
+*  [[3] Scaling Distributed Training of Flood-Filling Networks on HPC Infrastructure for Brain Mapping](https://arxiv.org/abs/1905.06236)
